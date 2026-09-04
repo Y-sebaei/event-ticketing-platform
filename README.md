@@ -166,6 +166,14 @@ special-cased, because neither is exceptional. See `apps/web/src/views/OrderView
 `ordering.webhook_event`. The second delivery inserts nothing and does nothing, and still
 returns 200 — answering a replay with an error is how you get retried for a week.
 
+**A late webhook, carrying a new event id.** Subtler, and it has to be handled separately,
+because the dedupe table above only catches a byte-identical replay. A `payment.succeeded`
+that arrives for an order the consumer has already fulfilled is *late*, not wrong: the
+order state machine forbids `fulfilled → paid`, so letting it run would throw a 409, and a
+provider that receives a non-2xx retries. The handler checks for `paid` or `fulfilled`
+first and answers 200 without doing anything. The same guard stops a late decline or
+expiry notice from walking a paid order backwards after the money was captured.
+
 **A declined card.** `payment.failed` moves the order to `failed` and releases the hold
 over gRPC. That release is deliberately best-effort: if inventory is unreachable, the
 reservation's TTL and the inventory service's sweeper collect it anyway. Making it

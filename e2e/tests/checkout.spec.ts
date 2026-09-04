@@ -38,7 +38,7 @@ test.describe('checkout', () => {
   });
 
   test('a declined card releases the seats and never issues a ticket', async ({ request }) => {
-    const { event, ticketType } = await firstAvailableTicketType(request, 'ostkreuz-techno-marathon');
+    const { event, ticketType } = await firstAvailableTicketType(request, 'ostkreuz-techno-marathon', 2);
     const before = ticketType.quantityAvailable;
 
     const order = await checkoutViaApi(request, {
@@ -68,7 +68,7 @@ test.describe('checkout', () => {
   });
 
   test('a replayed webhook does not issue a second set of tickets', async ({ request }) => {
-    const { event, ticketType } = await firstAvailableTicketType(request, 'nachtprogramm-late-opening');
+    const { event, ticketType } = await firstAvailableTicketType(request, 'nachtprogramm-late-opening', 3);
 
     const order = await checkoutViaApi(request, {
       eventSlug: event.slug,

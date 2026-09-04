@@ -35,8 +35,13 @@ test.describe('observability', () => {
     });
     await waitForOrderStatus(request, order, 'fulfilled');
 
-    // Tempo needs a moment to ingest, and the trace is only complete once the
-    // consumer's spans have been flushed.
+    // Poll until all three services are present, not just the first.
+    //
+    // A trace arrives in Tempo in pieces: the API's spans land seconds before
+    // the worker's, which are exported only after fulfilment completes. Polling
+    // until "api" appears and then asserting the rest tests nothing but
+    // ingestion speed, and fails on a partially ingested trace that is
+    // perfectly correct a second later.
     let services: string[] = [];
     await expect
       .poll(
@@ -50,15 +55,19 @@ test.describe('observability', () => {
               batch.resource?.attributes?.find((a) => a.key === 'service.name')?.value?.stringValue,
             )
             .filter(Boolean) as string[];
-          return services;
+          return [...new Set(services)].sort();
         },
-        { timeout: 60_000, intervals: [2000] },
+        { timeout: 90_000, intervals: [2000] },
       )
-      .toContain('api');
+      .toEqual(['api', 'inventory', 'worker']);
 
-    // The whole point: the consumer's work is in the same trace as the HTTP
-    // request that started it.
-    expect(services, `trace ${order.traceId} did not reach the inventory service`).toContain('inventory');
+    // Restated as explicit assertions so a failure names what is missing rather
+    // than printing an array diff. The whole point is that the consumer's work,
+    // in another process minutes later, shares a trace with the HTTP request
+    // that caused it.
+    expect(services, `trace ${order.traceId} never reached the inventory service`).toContain(
+      'inventory',
+    );
     expect(services, `trace ${order.traceId} did not cross the Kafka boundary`).toContain('worker');
   });
 

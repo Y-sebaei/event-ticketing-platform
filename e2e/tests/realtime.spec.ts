@@ -16,7 +16,7 @@ test.describe('realtime inventory', () => {
 
   test('two browsers watching one event see the count drop together', async ({ browser, request }) => {
     const slug = 'kreuzberg-jazz-sessions';
-    const { ticketType } = await firstAvailableTicketType(request, slug);
+    const { ticketType } = await firstAvailableTicketType(request, slug, 3);
 
     const contextA = await browser.newContext();
     const contextB = await browser.newContext();

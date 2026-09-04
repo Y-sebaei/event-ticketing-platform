@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { TOPICS } from '@ticketing/contracts';
-import { transition, type OrderStatus } from '@ticketing/domain';
+import { isTerminal, transition, type OrderStatus } from '@ticketing/domain';
 import {
   duplicatesSuppressed,
   ordersPaid,
@@ -141,7 +141,20 @@ export class PaymentsService {
             `SELECT status FROM ordering.customer_order WHERE id = $1 FOR UPDATE`,
             [order.id],
           );
-          const next = transition(locked.rows[0]!.status, 'paid');
+          const current = locked.rows[0]!.status;
+
+          // An order that is already paid — or already fulfilled, meaning the
+          // consumer got there first — has nothing left to do. This is not an
+          // error: webhooks are at-least-once, and a duplicate that arrives
+          // after fulfilment is late, not wrong. Letting the state machine
+          // throw here would return a non-2xx, and a payment provider that
+          // receives a non-2xx retries. For days.
+          if (current === 'paid' || current === 'fulfilled') {
+            duplicatesSuppressed.add(1, { guard: 'order_status', status: current });
+            return false;
+          }
+
+          const next = transition(current, 'paid');
           if (!next.changed) return false;
 
           await client.query(
@@ -218,7 +231,20 @@ export class PaymentsService {
         `SELECT status FROM ordering.customer_order WHERE id = $1 FOR UPDATE`,
         [order.id],
       );
-      const next = transition(locked.rows[0]!.status, status);
+      const current = locked.rows[0]!.status;
+
+      // Money has already been captured, so a late decline or expiry notice
+      // must not walk the order backwards. Terminal states are equally final.
+      // Same reasoning as markPaid: swallow it and answer 200, or be retried
+      // indefinitely.
+      if (current === 'paid' || current === 'fulfilled' || isTerminal(current)) {
+        this.logger.warn(
+          `ignoring late ${status} webhook for order ${order.id}, which is already ${current}`,
+        );
+        return;
+      }
+
+      const next = transition(current, status);
       if (!next.changed) return;
 
       await client.query(

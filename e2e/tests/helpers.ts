@@ -90,14 +90,27 @@ export async function waitForOrderStatus(
   return body;
 }
 
-export async function firstAvailableTicketType(request: APIRequestContext, slug: string) {
+/**
+ * Picks a ticket type that can actually satisfy `quantity`.
+ *
+ * Both the remaining stock and the per-order limit have to be checked. The API
+ * returns ticket types cheapest first, and the cheapest tier is often the one
+ * with the tightest maxPerOrder — so "the first one with stock" quietly picks a
+ * fixture that rejects the purchase the test is trying to make.
+ */
+export async function firstAvailableTicketType(
+  request: APIRequestContext,
+  slug: string,
+  quantity = 1,
+) {
   const response = await request.get(`${API}/events/${slug}`);
   expect(response.ok()).toBeTruthy();
   const event = await response.json();
   const ticketType = event.ticketTypes.find(
-    (t: { quantityAvailable: number }) => t.quantityAvailable > 0,
+    (t: { quantityAvailable: number; maxPerOrder: number }) =>
+      t.quantityAvailable >= quantity && t.maxPerOrder >= quantity,
   );
-  expect(ticketType, `no availability left for ${slug}`).toBeTruthy();
+  expect(ticketType, `no ticket type for ${slug} can sell ${quantity} at once`).toBeTruthy();
   return { event, ticketType };
 }
 
