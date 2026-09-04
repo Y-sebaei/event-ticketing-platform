@@ -205,10 +205,14 @@ export class InventoryService {
           throw new InvariantViolationError({ reason: 'commit_without_hold', orderId });
         }
 
-        const pending = reservations.rows.filter((r) => r.state === 'held');
-        if (pending.some((r) => r.state === 'released')) {
+        // Check the full set, not the held subset: a released reservation is
+        // exactly what must not be committed, and filtering first would mean
+        // this branch could never fire.
+        if (reservations.rows.some((r) => r.state === 'released')) {
           throw new InvariantViolationError({ reason: 'commit_after_release', orderId });
         }
+
+        const pending = reservations.rows.filter((r) => r.state === 'held');
 
         if (pending.length === 0) {
           span.setAttribute('inventory.commit.replayed', true);

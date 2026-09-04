@@ -145,6 +145,10 @@ services:
     # least-privilege role (see infra/postgres/init.sql).
     command: ['node', 'db/migrate.mjs']
     restart: 'no'
+    environment:
+      <<: *node-env
+      # One-shot container that runs before the collector is guaranteed up.
+      OTEL_SDK_DISABLED: 'true'
     depends_on:
       postgres:
         condition: service_healthy
@@ -223,6 +227,7 @@ services:
     environment:
       <<: *node-env
       API_URL: http://api:3000
+      OTEL_SDK_DISABLED: 'true'
     depends_on:
       api:
         condition: service_healthy
