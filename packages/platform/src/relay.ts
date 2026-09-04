@@ -1,4 +1,4 @@
-import { outboxPending } from '@ticketing/otel';
+import { outboxPending, withRestoredContext } from '@ticketing/otel';
 import type { Pool } from 'pg';
 import { publish, type Producer } from './kafka';
 import { claimOutboxBatch, countPendingOutbox, markOutboxFailed, markOutboxPublished } from './outbox';
@@ -74,15 +74,33 @@ export class OutboxRelay {
         for (const row of rows) {
           try {
             const envelope = row.payload;
-            await publish(this.options.producer, {
-              topic: row.topic,
-              key: row.message_key,
-              value: envelope,
-              traceContext: {
-                traceparent: envelope.traceparent as string | undefined,
-                tracestate: envelope.tracestate as string | undefined,
-              },
-            });
+            const carrier = {
+              traceparent: envelope.traceparent as string | undefined,
+              tracestate: envelope.tracestate as string | undefined,
+            };
+
+            // Publish *inside* the originating request's context, not the
+            // relay's.
+            //
+            // This loop runs on a timer with no active span, so kafkajs's
+            // auto-instrumentation would otherwise open a brand new root trace
+            // for its producer span — and inject that trace's id into the
+            // message headers, overwriting anything we set by hand. The
+            // consumer would then dutifully join the relay's trace instead of
+            // the customer's checkout, and the end-to-end trace would quietly
+            // stop at the Kafka boundary.
+            //
+            // Restoring the stored context first makes the producer span a
+            // child of the checkout, so the header it injects carries the trace
+            // we actually want to follow.
+            await withRestoredContext(carrier, () =>
+              publish(this.options.producer, {
+                topic: row.topic,
+                key: row.message_key,
+                value: envelope,
+                traceContext: carrier,
+              }),
+            );
             published.push(row.id);
           } catch (err) {
             await markOutboxFailed(client, this.options.schema, row.id, (err as Error).message);

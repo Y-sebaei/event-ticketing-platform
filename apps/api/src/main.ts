@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DomainExceptionFilter } from './common/domain-exception.filter';
@@ -13,8 +13,10 @@ async function bootstrap() {
     rawBody: true,
   });
 
-  app.setGlobalPrefix('', { exclude: [] });
-  app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+  // Validation is zod, applied per route with ZodValidationPipe, because the
+  // same schemas describe the Kafka contracts. Nest's ValidationPipe is
+  // deliberately absent: it needs class-validator, and having two validation
+  // vocabularies in one codebase is how they drift apart.
   app.useGlobalFilters(new DomainExceptionFilter());
   app.useGlobalInterceptors(app.get(MetricsInterceptor));
   app.enableCors({ origin: true, credentials: true });

@@ -7,7 +7,7 @@ import {
   type Currency,
   type TicketTypeSnapshot,
 } from '@ticketing/domain';
-import { ordersCreated, withSpan } from '@ticketing/otel';
+import { captureTraceContext, ordersCreated, withSpan } from '@ticketing/otel';
 import { withTransaction, type Pool } from '@ticketing/platform';
 import { PG_POOL } from '../common/tokens';
 import { InventoryClient } from '../common/inventory.client';
@@ -140,7 +140,10 @@ export class OrdersService {
         }
 
         const pricing = priceOrder({
-          requested: input.items.map((i) => ({ ticketTypeId: i.ticketTypeId, quantity: i.quantity })),
+          requested: input.items.map((i) => ({
+            ticketTypeId: i.ticketTypeId,
+            quantity: i.quantity,
+          })),
           ticketTypes: event.ticketTypes,
           serviceFeeBps: event.serviceFeeBps,
           currency: event.currency as Currency,
@@ -163,8 +166,8 @@ export class OrdersService {
           await client.query(
             `INSERT INTO ordering.customer_order
                (id, customer_id, event_id, status, subtotal_cents, fee_cents, total_cents,
-                currency, idempotency_key, access_token, expires_at)
-             VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, $10)`,
+                currency, idempotency_key, access_token, expires_at, trace_context)
+             VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, $10, $11)`,
             [
               orderId,
               customer.rows[0]!.id,
@@ -176,6 +179,9 @@ export class OrdersService {
               idempotencyKey,
               accessToken,
               expiresAt,
+              // The webhook resumes this context minutes later, so fulfilment
+              // lands in the same trace as the checkout that caused it.
+              JSON.stringify(captureTraceContext()),
             ],
           );
 
@@ -193,7 +199,10 @@ export class OrdersService {
           await this.inventory.hold({
             orderId,
             eventId: event.id,
-            items: pricing.lines.map((l) => ({ ticketTypeId: l.ticketTypeId, quantity: l.quantity })),
+            items: pricing.lines.map((l) => ({
+              ticketTypeId: l.ticketTypeId,
+              quantity: l.quantity,
+            })),
             ttlSeconds: Math.floor(HOLD_TTL_MS / 1000),
           });
         } catch (err) {

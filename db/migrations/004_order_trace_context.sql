@@ -1,0 +1,13 @@
+-- Carries the checkout's W3C trace context on the order.
+--
+-- A payment webhook is an independent inbound HTTP request that arrives minutes
+-- later, so it naturally starts its own trace. That would split one business
+-- transaction across two traces: the customer's checkout in one, and the
+-- payment, Kafka publication and ticket issuance in another.
+--
+-- Storing the checkout's context here lets the webhook handler resume it, so
+-- everything that happens to an order — including the asynchronous fulfilment
+-- in another process — belongs to the trace that started when the customer
+-- pressed buy. The webhook's own trace keeps a span link back to it, so the
+-- relationship is navigable from either end.
+ALTER TABLE ordering.customer_order ADD COLUMN trace_context jsonb;

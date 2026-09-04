@@ -1,7 +1,13 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { TOPICS } from '@ticketing/contracts';
 import { transition, type OrderStatus } from '@ticketing/domain';
-import { duplicatesSuppressed, ordersPaid, withSpan } from '@ticketing/otel';
+import {
+  duplicatesSuppressed,
+  ordersPaid,
+  withRestoredContext,
+  withSpan,
+  type TraceCarrier,
+} from '@ticketing/otel';
 import { enqueueOutbox, withTransaction, type Pool } from '@ticketing/platform';
 import { PG_POOL } from '../common/tokens';
 import { InventoryClient } from '../common/inventory.client';
@@ -15,6 +21,8 @@ interface OrderRow {
   currency: string;
   email: string;
   name: string;
+  /** The context captured when this order's checkout ran. */
+  trace_context: TraceCarrier | null;
 }
 
 @Injectable()
@@ -62,6 +70,10 @@ export class PaymentsService {
         }
 
         span.setAttribute('order.id', order.id);
+        // Navigable from this side too: the webhook keeps its own trace, and
+        // this attribute points at the checkout trace the work joins.
+        const checkoutTraceId = order.trace_context?.traceparent?.split('-')[1];
+        if (checkoutTraceId) span.setAttribute('checkout.trace_id', checkoutTraceId);
 
         switch (event.type) {
           case 'payment.succeeded':
@@ -83,7 +95,8 @@ export class PaymentsService {
 
   private async findOrder(event: PaymentEvent): Promise<OrderRow | null> {
     const { rows } = await this.pool.query<OrderRow>(
-      `SELECT o.id, o.event_id, o.status, o.total_cents, o.currency, c.email, c.name
+      `SELECT o.id, o.event_id, o.status, o.total_cents, o.currency, o.trace_context,
+              c.email, c.name
          FROM ordering.customer_order o
          JOIN ordering.customer c ON c.id = o.customer_id
         WHERE o.payment_session_id = $1 OR o.id = $2::uuid
@@ -111,62 +124,74 @@ export class PaymentsService {
    * atomic with no distributed-transaction machinery at all.
    */
   private async markPaid(order: OrderRow, event: PaymentEvent): Promise<void> {
-    const changed = await withTransaction(this.pool, async (client) => {
-      const locked = await client.query<{ status: OrderStatus }>(
-        `SELECT status FROM ordering.customer_order WHERE id = $1 FOR UPDATE`,
-        [order.id],
-      );
-      const next = transition(locked.rows[0]!.status, 'paid');
-      if (!next.changed) return false;
+    // Everything below runs under the checkout's trace context rather than the
+    // webhook's. The webhook is an independent inbound request and would
+    // otherwise open a second trace, splitting one purchase across two: the
+    // customer's checkout in one, the payment and fulfilment in another.
+    //
+    // Resuming it here means the outbox row — and therefore the Kafka message,
+    // and therefore the consumer in another process minutes later — all carry
+    // the trace that began when the customer pressed buy.
+    const changed = await withRestoredContext(order.trace_context, () =>
+      withSpan('payments.markPaid', { 'order.id': order.id }, async () =>
+        withTransaction(this.pool, async (client) => {
+          const locked = await client.query<{ status: OrderStatus }>(
+            `SELECT status FROM ordering.customer_order WHERE id = $1 FOR UPDATE`,
+            [order.id],
+          );
+          const next = transition(locked.rows[0]!.status, 'paid');
+          if (!next.changed) return false;
 
-      await client.query(
-        `UPDATE ordering.customer_order
+          await client.query(
+            `UPDATE ordering.customer_order
             SET status = 'paid', paid_at = now(), updated_at = now(),
                 payment_intent_id = COALESCE($2, payment_intent_id),
                 payment_status_detail = $3
           WHERE id = $1`,
-        [order.id, event.paymentIntentId ?? null, event.detail ?? 'paid'],
-      );
+            [order.id, event.paymentIntentId ?? null, event.detail ?? 'paid'],
+          );
 
-      const items = await client.query<{
-        ticket_type_id: string;
-        name_snapshot: string;
-        quantity: number;
-        unit_price_cents: number;
-      }>(
-        `SELECT ticket_type_id, name_snapshot, quantity, unit_price_cents
+          const items = await client.query<{
+            ticket_type_id: string;
+            name_snapshot: string;
+            quantity: number;
+            unit_price_cents: number;
+          }>(
+            `SELECT ticket_type_id, name_snapshot, quantity, unit_price_cents
            FROM ordering.order_item WHERE order_id = $1 ORDER BY ticket_type_id`,
-        [order.id],
-      );
+            [order.id],
+          );
 
-      await enqueueOutbox(client, {
-        schema: 'ordering',
-        aggregateType: 'order',
-        aggregateId: order.id,
-        topic: TOPICS.ORDER_PAID,
-        // Keying by order id puts every message for one order on one partition,
-        // so they are consumed in the order they were produced.
-        messageKey: order.id,
-        type: 'order.paid',
-        payload: {
-          orderId: order.id,
-          eventId: order.event_id,
-          customerEmail: order.email,
-          customerName: order.name,
-          currency: order.currency,
-          totalCents: order.total_cents,
-          paymentReference: event.paymentIntentId ?? event.sessionId,
-          items: items.rows.map((i) => ({
-            ticketTypeId: i.ticket_type_id,
-            name: i.name_snapshot,
-            quantity: i.quantity,
-            unitPriceCents: i.unit_price_cents,
-          })),
-        },
-      });
+          await enqueueOutbox(client, {
+            schema: 'ordering',
+            aggregateType: 'order',
+            aggregateId: order.id,
+            topic: TOPICS.ORDER_PAID,
+            // Keying by order id puts every message for one order on one partition,
+            // so they are consumed in the order they were produced.
+            messageKey: order.id,
+            type: 'order.paid',
+            payload: {
+              orderId: order.id,
+              eventId: order.event_id,
+              customerEmail: order.email,
+              customerName: order.name,
+              currency: order.currency,
+              totalCents: order.total_cents,
+              paymentReference: event.paymentIntentId ?? event.sessionId,
+              items: items.rows.map((i) => ({
+                ticketTypeId: i.ticket_type_id,
+                name: i.name_snapshot,
+                quantity: i.quantity,
+                unitPriceCents: i.unit_price_cents,
+              })),
+            },
+          });
 
-      return true;
-    });
+          return true;
+        }),
+      ),
+    );
 
     if (changed) {
       ordersPaid.add(1, { currency: order.currency });
@@ -181,7 +206,11 @@ export class PaymentsService {
    * best-effort stops a flaky inventory service from turning a declined card
    * into a 500 that the provider then retries for days.
    */
-  private async finish(order: OrderRow, status: 'failed' | 'expired', detail: string): Promise<void> {
+  private async finish(
+    order: OrderRow,
+    status: 'failed' | 'expired',
+    detail: string,
+  ): Promise<void> {
     await withTransaction(this.pool, async (client) => {
       const locked = await client.query<{ status: OrderStatus }>(
         `SELECT status FROM ordering.customer_order WHERE id = $1 FOR UPDATE`,

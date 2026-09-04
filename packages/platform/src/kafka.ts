@@ -80,6 +80,64 @@ export interface ConsumerOptions {
   fromBeginning?: boolean;
 }
 
+/**
+ * Creates any of `topics` that do not exist yet, and waits for their leaders.
+ *
+ * Auto-creation is enabled on the broker, but it happens lazily on the *first
+ * produce*, not on subscribe. A consumer that starts before anything has been
+ * published therefore subscribes to a topic the broker does not host yet, and
+ * kafkajs surfaces that as an unhandled KafkaJSProtocolError that takes the
+ * process down. On a cold `docker compose up` that is the normal case, not an
+ * edge case: the API's realtime consumer starts long before the first ticket is
+ * sold.
+ *
+ * Declaring the topics up front also means partition counts are ours to choose
+ * rather than whatever the broker default happens to be.
+ */
+export async function ensureTopics(kafka: Kafka, topics: string[], numPartitions = 3): Promise<void> {
+  const wanted = topics.filter(Boolean);
+  if (wanted.length === 0) return;
+
+  const admin = kafka.admin();
+  await admin.connect();
+  try {
+    const existing = new Set(await admin.listTopics());
+    const missing = wanted.filter((topic) => !existing.has(topic));
+    if (missing.length > 0) {
+      await admin.createTopics({
+        topics: missing.map((topic) => ({ topic, numPartitions, replicationFactor: 1 })),
+        // Not kafkajs's own leader wait. That polls metadata and rethrows the
+        // retriable UNKNOWN_TOPIC_OR_PARTITION straight out of the promise
+        // while a freshly created topic is still propagating, which kills the
+        // process. We wait below instead, where a retriable error is actually
+        // treated as retriable.
+        waitForLeaders: false,
+      });
+    }
+
+    // Every partition must report a leader before a consumer subscribes,
+    // otherwise the subscribe hits the same race one layer down.
+    for (let attempt = 1; attempt <= 40; attempt++) {
+      try {
+        const metadata = await admin.fetchTopicMetadata({ topics: wanted });
+        const ready =
+          metadata.topics.length === wanted.length &&
+          metadata.topics.every(
+            (topic) =>
+              topic.partitions.length > 0 && topic.partitions.every((partition) => partition.leader >= 0),
+          );
+        if (ready) return;
+      } catch {
+        // The topic is not visible on this broker yet. That is the expected
+        // state for the first second or so after creation.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  } finally {
+    await admin.disconnect();
+  }
+}
+
 /** Injects the active context into a plain carrier, for non-Kafka hand-offs. */
 export function injectTraceHeaders(): Record<string, string> {
   const carrier: Record<string, string> = {};
@@ -110,11 +168,17 @@ export async function startConsumer(options: ConsumerOptions): Promise<Consumer>
 
   const consumer = kafka.consumer({
     groupId,
-    // Long enough that a slow fulfilment (payment provider, SMTP) does not
-    // trigger a rebalance mid-message, which is its own source of duplicates.
-    sessionTimeout: 45_000,
-    heartbeatInterval: 5_000,
+    // Kept at the kafkajs default rather than raised. A longer session timeout
+    // sounds safer, but it is also how long a crashed member keeps its slot in
+    // the group: raise it and every restart spends that long failing to
+    // rejoin, with SyncGroup timing out and the consumer looping. Fulfilment
+    // work is short — the slow calls live in the API, not here.
+    sessionTimeout: 30_000,
+    heartbeatInterval: 3_000,
   });
+
+  // Must happen before connect/subscribe; see ensureTopics above.
+  await ensureTopics(kafka, dlqTopic ? [...topics, dlqTopic] : topics);
 
   await consumer.connect();
   for (const topic of topics) {

@@ -367,12 +367,34 @@ patches `http`, `pg`, `grpc` and `kafkajs` before the application imports them. 
 `sdk.start()` from inside `main.ts` is the single most common reason a service produces a
 trace with one span in it and nothing underneath.
 
-**Trace continuity across Kafka** is the piece that makes this more than a tutorial. The
-active `traceparent` is captured *at outbox-write time* — inside the transaction — stored
-on the row, injected as a Kafka message header by the relay, and extracted by the consumer
-before any work happens. So the consumer's spans are children of the checkout that caused
-them, minutes later, in a different process. `packages/otel/src/tracing.ts` and
-`packages/platform/src/kafka.ts`.
+**Trace continuity across Kafka** is the piece that makes this more than a tutorial, and
+it took three separate mechanisms to get right. Each one is a place where the trace
+silently breaks if you leave it out:
+
+1. **The checkout's context is stored on the order** (`customer_order.trace_context`). A
+   payment webhook is an independent inbound HTTP request that arrives minutes later, so
+   it starts its own trace. Without this, one purchase is split across two traces: the
+   customer's checkout in one, the payment and everything downstream in another. The
+   webhook handler resumes the stored context, and keeps a `checkout.trace_id` attribute
+   on its own span so the link is navigable from both ends.
+2. **The outbox row captures the active context inside the transaction**, so the message
+   about a state change cannot end up in a different trace from the change itself.
+3. **The relay publishes each row under that stored context.** This one is the least
+   obvious and the easiest to get wrong. The relay polls on a timer, so it has no active
+   span, and kafkajs's auto-instrumentation will happily open a brand new root trace for
+   its producer span — then inject *that* trace id into the message headers, overwriting
+   anything set by hand. The consumer joins it faithfully, the worker traces perfectly,
+   and the end-to-end trace stops dead at the Kafka boundary while every individual
+   service looks correctly instrumented. Restoring the stored context around the publish
+   makes the producer span a child of the checkout instead.
+
+The result is one trace of roughly 70 spans covering `POST /checkout` → PostgreSQL → gRPC
+hold → WebSocket broadcast → payment webhook → Kafka → fulfilment in another process →
+gRPC commit → ticket insert → confirmation email → Kafka → WebSocket. An end-to-end test
+asserts all three service names appear in it, so this cannot regress unnoticed.
+
+See `packages/otel/src/tracing.ts`, `packages/platform/src/relay.ts` and
+`apps/api/src/payments/payments.service.ts`.
 
 **RED metrics** come from one histogram, `http.server.request.duration`: rate is its
 count, errors are the subset with an error status attribute, duration is the distribution.
