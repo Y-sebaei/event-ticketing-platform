@@ -66,10 +66,16 @@ await json('/payments/local/complete', {
 });
 log('payment webhook delivered and verified');
 
+// Fulfilment is asynchronous, and on a cold stack the consumer may still be
+// joining its group when this runs, so the window is generous. A run seconds
+// after `docker compose up` should not report a failure for an order that
+// fulfils a moment later.
 let order;
-for (let attempt = 1; attempt <= 40; attempt++) {
+for (let attempt = 1; attempt <= 120; attempt++) {
   order = await json(`/orders/${checkout.orderId}?token=${checkout.accessToken}`);
   if (order.status === 'fulfilled') break;
+  if (order.status === 'failed' || order.status === 'expired') break;
+  if (attempt === 20) log('still waiting on the fulfilment consumer...');
   await new Promise((r) => setTimeout(r, 500));
 }
 

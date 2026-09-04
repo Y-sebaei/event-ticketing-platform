@@ -21,6 +21,7 @@ interface OrderRow {
   currency: string;
   email: string;
   name: string;
+  event_title: string;
   /** The context captured when this order's checkout ran. */
   trace_context: TraceCarrier | null;
 }
@@ -96,9 +97,10 @@ export class PaymentsService {
   private async findOrder(event: PaymentEvent): Promise<OrderRow | null> {
     const { rows } = await this.pool.query<OrderRow>(
       `SELECT o.id, o.event_id, o.status, o.total_cents, o.currency, o.trace_context,
-              c.email, c.name
+              c.email, c.name, e.title AS event_title
          FROM ordering.customer_order o
          JOIN ordering.customer c ON c.id = o.customer_id
+         JOIN catalog.event e ON e.id = o.event_id
         WHERE o.payment_session_id = $1 OR o.id = $2::uuid
         LIMIT 1`,
       [event.sessionId, event.orderId ?? null],

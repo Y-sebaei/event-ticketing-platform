@@ -61,6 +61,17 @@ export const orderPaidSchema = envelopeSchema.extend({
   payload: z.object({
     orderId: z.string().uuid(),
     eventId: z.string().uuid(),
+    // Carried on the message so the consumer never has to read the catalog to
+    // write a confirmation email. Crossing back into another service's schema
+    // for one string would undo the boundary for no benefit.
+    //
+    // Optional, not required. Adding a required field to an event contract is a
+    // breaking change: every message already sitting in the log lacks it, and
+    // they all fail validation the moment the new consumer deploys. Without a
+    // schema registry to enforce compatibility, the discipline has to live
+    // here — new fields are optional, and consumers carry a fallback until the
+    // old messages have aged out.
+    eventTitle: z.string().min(1).optional(),
     customerEmail: z.string().email(),
     customerName: z.string().min(1),
     currency: z.string().length(3),

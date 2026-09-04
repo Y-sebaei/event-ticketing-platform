@@ -157,7 +157,8 @@ export class FulfilmentConsumer implements OnModuleInit, OnApplicationShutdown {
           to: message.payload.customerEmail,
           name: message.payload.customerName,
           orderId,
-          eventTitle: message.payload.items[0]?.name ?? 'your event',
+          // Fallback covers messages produced before eventTitle was added.
+          eventTitle: message.payload.eventTitle ?? 'your event',
           serials: issued,
           totalCents: message.payload.totalCents,
           currency: message.payload.currency,

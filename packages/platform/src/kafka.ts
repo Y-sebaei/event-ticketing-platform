@@ -146,6 +146,19 @@ export function injectTraceHeaders(): Record<string, string> {
 }
 
 /**
+ * A message that can never succeed, no matter how often it is redelivered.
+ *
+ * Schema failures are the clear case: a payload missing a required field will
+ * still be missing it on the tenth attempt. Treating these as retriable is how
+ * a single malformed message stalls a partition — and, because the offset never
+ * advances, every well-formed order queued behind it too.
+ */
+function isPoisonMessage(err: unknown): boolean {
+  const name = (err as { name?: string })?.name;
+  return name === 'ZodError' || name === 'SyntaxError';
+}
+
+/**
  * Starts a consumer with **manual offset commits**.
  *
  * This is the mechanism behind "survives being killed mid-batch without losing
@@ -185,10 +198,18 @@ export async function startConsumer(options: ConsumerOptions): Promise<Consumer>
     await consumer.subscribe({ topic, fromBeginning: options.fromBeginning ?? true });
   }
 
+  // Attempts are counted here, in the consumer, keyed by the message's position
+  // in the log. They cannot be read off a header: the producer never sets one,
+  // so an original message always looks like attempt 1 and would retry forever
+  // — which defeats the dead-letter queue entirely and lets one bad message
+  // block its partition indefinitely.
+  const attempts = new Map<string, number>();
+
   await consumer.run({
     autoCommit: false,
     eachMessage: async ({ topic, partition, message }: EachMessagePayload) => {
       const raw = message.value?.toString('utf8') ?? '{}';
+      const positionKey = `${topic}/${partition}/${message.offset}`;
       const traceContext = {
         traceparent: message.headers?.traceparent?.toString(),
         tracestate: message.headers?.tracestate?.toString(),
@@ -226,12 +247,22 @@ export async function startConsumer(options: ConsumerOptions): Promise<Consumer>
               envelope,
               traceContext,
             });
+            attempts.delete(positionKey);
             messagesConsumed.add(1, { topic, group: groupId, outcome: 'processed' });
           } catch (err) {
             span.recordException(err as Error);
-            const attempt = Number(message.headers?.['x-attempt']?.toString() ?? '0') + 1;
+            const attempt = (attempts.get(positionKey) ?? 0) + 1;
+            attempts.set(positionKey, attempt);
 
-            if (dlqTopic && producer && attempt >= maxAttempts) {
+            // A message that fails validation will never pass it, however many
+            // times it is redelivered. Retrying a malformed payload just delays
+            // the inevitable while holding up everything behind it, so it goes
+            // straight to the dead-letter queue.
+            const poisoned = isPoisonMessage(err);
+            span.setAttribute('messaging.attempt', attempt);
+            span.setAttribute('messaging.poisoned', poisoned);
+
+            if (dlqTopic && producer && (poisoned || attempt >= maxAttempts)) {
               await producer.send({
                 topic: dlqTopic,
                 messages: [
@@ -247,6 +278,7 @@ export async function startConsumer(options: ConsumerOptions): Promise<Consumer>
                   },
                 ],
               });
+              attempts.delete(positionKey);
               messagesConsumed.add(1, { topic, group: groupId, outcome: 'dead-lettered' });
             } else {
               // Not dead-lettered: rethrow so the offset stays uncommitted and
