@@ -1,0 +1,244 @@
+# One `docker compose up` brings up the entire platform: application services,
+# Kafka, Elasticsearch, Postgres, and the full observability stack. There is no
+# second setup step. Services declare healthchecks and ordered dependencies so
+# the first run works from cold on a clean machine.
+name: event-ticketing
+
+x-node-app: &node-app
+  build:
+    context: .
+    dockerfile: Dockerfile
+  environment: &node-env
+    NODE_ENV: production
+    DATABASE_URL: postgres://app:app@postgres:5432/ticketing
+    KAFKA_BROKERS: kafka:9092
+    ELASTICSEARCH_URL: http://elasticsearch:9200
+    INVENTORY_GRPC_URL: inventory:50051
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    OTEL_LOG_LEVEL: error
+    SMTP_HOST: mailpit
+    SMTP_PORT: '1025'
+    STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+    STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+    LOCAL_PAYMENT_WEBHOOK_SECRET: ${LOCAL_PAYMENT_WEBHOOK_SECRET:-whsec_local_dev_secret}
+    PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:5173}
+    PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:3000}
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: ticketing
+    ports: ['5432:5432']
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U app -d ticketing']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  kafka:
+    image: bitnami/kafka:3.9
+    environment:
+      KAFKA_CFG_NODE_ID: '1'
+      KAFKA_CFG_PROCESS_ROLES: broker,controller
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '1'
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: '1'
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_CFG_NUM_PARTITIONS: '3'
+      ALLOW_PLAINTEXT_LISTENER: 'yes'
+    ports: ['29092:29092']
+    volumes:
+      - kafkadata:/bitnami/kafka
+    healthcheck:
+      test: ['CMD-SHELL', 'kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1']
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'false'
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports: ['9200:9200']
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=3s || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports: ['8025:8025']
+    environment:
+      MP_MAX_MESSAGES: '500'
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    command: ['--config=/etc/otel/config.yaml']
+    volumes:
+      - ./infra/otel/collector.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - '4317:4317'
+      - '4318:4318'
+      - '8889:8889'
+    depends_on:
+      tempo:
+        condition: service_started
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: ['-config.file=/etc/tempo/tempo.yaml']
+    user: '0:0'
+    volumes:
+      - ./infra/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempodata:/var/tempo
+    ports: ['3200:3200']
+
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --enable-feature=exemplar-storage
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ['9090:9090']
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: 'true'
+      GF_FEATURE_TOGGLES_ENABLE: traceqlEditor
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ['3001:3000']
+    depends_on:
+      prometheus:
+        condition: service_started
+      tempo:
+        condition: service_started
+
+  migrate:
+    <<: *node-app
+    # Runs as the owning `app` role; every other service connects with its own
+    # least-privilege role (see infra/postgres/init.sql).
+    command: ['node', 'db/migrate.mjs']
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  inventory:
+    <<: *node-app
+    command: ['node', 'apps/inventory/dist/main.js']
+    # Deliberately no published port: the inventory service speaks gRPC on the
+    # internal network only and is not part of the public API surface.
+    expose: ['50051']
+    environment:
+      <<: *node-env
+      DATABASE_URL: postgres://svc_inventory:svc_inventory@postgres:5432/ticketing
+      HEALTH_PORT: '3003'
+      OTEL_SERVICE_NAME: inventory
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://localhost:3003/health/ready || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  api:
+    <<: *node-app
+    command: ['node', 'apps/api/dist/main.js']
+    ports: ['3000:3000']
+    environment:
+      <<: *node-env
+      DATABASE_URL: postgres://svc_api:svc_api@postgres:5432/ticketing
+      OTEL_SERVICE_NAME: api
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      inventory:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://localhost:3000/health/ready || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  worker:
+    <<: *node-app
+    command: ['node', 'apps/worker/dist/main.js']
+    ports: ['3002:3002']
+    environment:
+      <<: *node-env
+      DATABASE_URL: postgres://svc_worker:svc_worker@postgres:5432/ticketing
+      OTEL_SERVICE_NAME: worker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      inventory:
+        condition: service_healthy
+
+  # Runs once after the API is healthy, then exits. Berlin venues and events, so
+  # the app is never empty on first run.
+  seed:
+    <<: *node-app
+    command: ['node', 'scripts/seed.mjs']
+    restart: 'no'
+    environment:
+      <<: *node-env
+      API_URL: http://api:3000
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports: ['5173:80']
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  kafkadata:
+  esdata:
+  tempodata:

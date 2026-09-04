@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Every application metric arrives here: the SDKs push OTLP to the collector,
+  # the collector re-exposes it on :8889, Prometheus scrapes that one target.
+  - job_name: otel-collector
+    static_configs:
+      - targets: ['otel-collector:8889']
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: tempo
+    static_configs:
+      - targets: ['tempo:3200']
