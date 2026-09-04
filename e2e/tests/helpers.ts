@@ -2,19 +2,30 @@ import { expect, type APIRequestContext, type Page } from '@playwright/test';
 
 export const API = process.env.E2E_API_URL ?? 'http://localhost:3000';
 
-/** Waits for the seeded catalog to be searchable before a test depends on it. */
+/**
+ * Waits for the seeded catalog to be genuinely searchable.
+ *
+ * Waiting for rows to exist is not enough, and the difference is a real source
+ * of flakes on a cold start. Seeding writes to Postgres and only then indexes
+ * asynchronously through the outbox, and in that window the API serves results
+ * from its database fallback — which satisfies "there are nine events" while
+ * `source` is still 'database'. A test asserting that Elasticsearch is doing
+ * the work would then fail on a cold CI runner and pass on a warm laptop.
+ *
+ * So the precondition is both: the events are there, and search is answering.
+ */
 export async function waitForCatalog(request: APIRequestContext, minimum = 5): Promise<void> {
   await expect
     .poll(
       async () => {
         const response = await request.get(`${API}/events?pageSize=50`);
-        if (!response.ok()) return 0;
+        if (!response.ok()) return 'unreachable';
         const body = await response.json();
-        return body.total as number;
+        return (body.total as number) >= minimum ? (body.source as string) : `only ${body.total}`;
       },
-      { timeout: 120_000, intervals: [1000] },
+      { timeout: 180_000, intervals: [1000] },
     )
-    .toBeGreaterThanOrEqual(minimum);
+    .toBe('search');
 }
 
 export interface CheckoutResponse {
