@@ -1,0 +1,32 @@
+{
+  "name": "@ticketing/inventory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.12.5",
+    "@grpc/proto-loader": "^0.7.13",
+    "@nestjs/common": "^11.0.1",
+    "@nestjs/core": "^11.0.1",
+    "@nestjs/microservices": "^11.0.1",
+    "@nestjs/platform-express": "^11.0.1",
+    "@opentelemetry/api": "^1.9.0",
+    "@ticketing/contracts": "*",
+    "@ticketing/domain": "*",
+    "@ticketing/otel": "*",
+    "pg": "^8.13.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "@ticketing/platform": "*",
+    "kafkajs": "^2.2.4"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10"
+  }
+}
