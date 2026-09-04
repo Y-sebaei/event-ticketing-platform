@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  lint-and-unit:
+    name: Lint, typecheck and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --workspaces --include-workspace-root
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build workspace packages
+        run: npm run build
+
+      - name: Unit tests (domain rules)
+        run: npm test -- --coverage
+
+      - name: Fail if the generated gRPC types are stale
+        # The .proto and its generated types are both committed. If someone
+        # edits one without the other, the contract silently drifts.
+        run: |
+          if ! grep -q "$(grep -oP 'rpc \K\w+' packages/contracts/proto/inventory.proto | head -1)" \
+                 packages/contracts/src/generated/inventory.ts; then
+            echo "packages/contracts/src/generated/inventory.ts is out of date with inventory.proto"
+            echo "run: npm run proto:gen --workspace=@ticketing/contracts"
+            exit 1
+          fi
+
+  e2e:
+    name: End-to-end against the real stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --workspaces --include-workspace-root
+
+      - name: Raise the vm.max_map_count Elasticsearch needs
+        run: sudo sysctl -w vm.max_map_count=262144
+
+      # Exactly the command in the README. If this step needs anything extra,
+      # the README's promise is broken and CI is the place to find out.
+      - name: docker compose up
+        run: docker compose up -d --build
+
+      - name: Wait for the API to become healthy
+        run: |
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:3000/health/ready > /dev/null 2>&1; then
+              echo "api ready after ${i}0s"; exit 0
+            fi
+            sleep 10
+          done
+          echo "api never became ready"; docker compose ps; docker compose logs --tail=200; exit 1
+
+      - name: Wait for the seed to finish
+        run: |
+          for i in $(seq 1 60); do
+            total=$(curl -fsS 'http://localhost:3000/events?pageSize=50' | node -e \
+              'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).total)}catch{console.log(0)}})')
+            if [ "${total:-0}" -ge 5 ]; then echo "catalog seeded: $total events"; exit 0; fi
+            sleep 5
+          done
+          echo "catalog never filled"; docker compose logs seed worker --tail=200; exit 1
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run end-to-end tests
+        run: npm run e2e
+
+      - name: Collect container logs on failure
+        if: failure()
+        run: docker compose logs --tail=400 > docker-logs.txt || true
+
+      - name: Upload artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: |
+            playwright-report/
+            test-results/
+            docker-logs.txt
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
