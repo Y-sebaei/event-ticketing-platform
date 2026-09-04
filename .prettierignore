@@ -1,0 +1,5 @@
+dist
+coverage
+node_modules
+infra/grafana/dashboards
+packages/contracts/src/generated

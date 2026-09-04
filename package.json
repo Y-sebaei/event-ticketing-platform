@@ -1,0 +1,46 @@
+{
+  "name": "event-ticketing-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Event ticketing platform: NestJS + Vue 3 + Postgres + Kafka + Elasticsearch, instrumented end to end with OpenTelemetry.",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "e2e"
+  ],
+  "scripts": {
+    "up": "docker compose up -d --build",
+    "down": "docker compose down -v",
+    "logs": "docker compose logs -f api inventory worker",
+    "seed": "docker compose exec -T api node dist/../scripts/seed.js || node scripts/seed.mjs",
+    "demo:checkout": "node scripts/demo-checkout.mjs",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test --config e2e/playwright.config.ts",
+    "e2e:ui": "playwright test --config e2e/playwright.config.ts --ui"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@playwright/test": "^1.49.1",
+    "@types/node": "^22.10.2",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-vue": "^10.10.0",
+    "globals": "^17.12.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1",
+    "vitest": "^2.1.8",
+    "vue-eslint-parser": "^10.4.1"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}
