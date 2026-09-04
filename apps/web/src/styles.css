@@ -1,0 +1,104 @@
+:root {
+  color-scheme: light dark;
+  --bg: #0f1117;
+  --surface: #171a23;
+  --surface-2: #1f232f;
+  --border: #2a2f3d;
+  --text: #e8eaf0;
+  --muted: #9aa2b4;
+  --accent: #ff5c39;
+  --accent-soft: rgba(255, 92, 57, 0.14);
+  --ok: #37c98b;
+  --warn: #f3c969;
+  --radius: 12px;
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  line-height: 1.5;
+}
+
+a { color: inherit; text-decoration: none; }
+
+.container { max-width: 1040px; margin: 0 auto; padding: 0 20px 64px; }
+
+header.site {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 32px;
+  background: var(--surface);
+}
+header.site .inner {
+  max-width: 1040px; margin: 0 auto; padding: 18px 20px;
+  display: flex; align-items: baseline; gap: 14px;
+}
+header.site .brand { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+header.site .tag { color: var(--muted); font-size: 13px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+
+.filters {
+  display: grid; gap: 12px; margin-bottom: 24px;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+}
+@media (max-width: 760px) { .filters { grid-template-columns: 1fr; } }
+
+input, select, button {
+  font: inherit;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+button {
+  cursor: pointer;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); font-weight: 500; }
+
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font-size: 12px; background: var(--accent-soft); color: var(--accent); font-weight: 600;
+}
+.badge.ok { background: rgba(55, 201, 139, 0.14); color: var(--ok); }
+.badge.warn { background: rgba(243, 201, 105, 0.14); color: var(--warn); }
+
+.remaining { font-variant-numeric: tabular-nums; font-weight: 700; }
+/* The flash is the point of the realtime feature: two browsers, same number,
+   same moment. Without a visible transition it is easy to miss. */
+.remaining.changed { animation: pulse 700ms ease-out; }
+@keyframes pulse {
+  0% { color: var(--accent); transform: scale(1.25); }
+  100% { color: inherit; transform: scale(1); }
+}
+
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.stack { display: grid; gap: 12px; }
+.error {
+  border: 1px solid rgba(255, 92, 57, 0.4);
+  background: rgba(255, 92, 57, 0.08);
+  padding: 12px; border-radius: 8px;
+}
