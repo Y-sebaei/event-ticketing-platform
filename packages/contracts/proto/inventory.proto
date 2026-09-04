@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package ticketing.inventory.v1;
+
+// The inventory service is the sole writer of "how many are left". Every other
+// service asks it; nothing else touches the inventory schema.
+//
+// This is gRPC rather than REST because every call here is an internal,
+// high-frequency, strongly-typed command between two of our own services, where
+// a schema mismatch should be a compile error rather than a 400 discovered in
+// production. The public API stays REST/JSON because its clients are browsers
+// and its consumers are humans reading a URL. The README expands on this.
+service InventoryService {
+  // Control plane: called once when a ticket type is published, so inventory
+  // learns the ceiling it must enforce.
+  rpc RegisterTicketType(RegisterTicketTypeRequest) returns (TicketTypeInventory);
+
+  // Read path: powers the event page and the realtime broadcast.
+  rpc GetAvailability(GetAvailabilityRequest) returns (GetAvailabilityResponse);
+
+  // Write path. All three are idempotent on order_id: calling them twice with
+  // the same order produces the same end state and reports changed = false the
+  // second time.
+  rpc Hold(HoldRequest) returns (HoldResponse);
+  rpc Commit(CommitRequest) returns (CommitResponse);
+  rpc Release(ReleaseRequest) returns (ReleaseResponse);
+}
+
+message LineItem {
+  string ticket_type_id = 1;
+  int32 quantity = 2;
+}
+
+message TicketTypeInventory {
+  string ticket_type_id = 1;
+  string event_id = 2;
+  int32 quantity_total = 3;
+  int32 quantity_reserved = 4;
+  int32 quantity_sold = 5;
+  int32 quantity_available = 6;
+}
+
+message RegisterTicketTypeRequest {
+  string ticket_type_id = 1;
+  string event_id = 2;
+  int32 quantity_total = 3;
+}
+
+message GetAvailabilityRequest {
+  // Either one event's ticket types, or an explicit list. Exactly one is set.
+  string event_id = 1;
+  repeated string ticket_type_ids = 2;
+}
+
+message GetAvailabilityResponse {
+  repeated TicketTypeInventory items = 1;
+}
+
+message HoldRequest {
+  string order_id = 1;
+  string event_id = 2;
+  repeated LineItem items = 3;
+  int32 ttl_seconds = 4;
+}
+
+message HoldResponse {
+  string order_id = 1;
+  // false when this order already held these seats: the caller retried.
+  bool changed = 2;
+  string expires_at = 3; // RFC 3339
+  repeated TicketTypeInventory items = 4;
+}
+
+message CommitRequest {
+  string order_id = 1;
+}
+
+message CommitResponse {
+  string order_id = 1;
+  bool changed = 2;
+  repeated TicketTypeInventory items = 3;
+}
+
+message ReleaseRequest {
+  string order_id = 1;
+  string reason = 2;
+}
+
+message ReleaseResponse {
+  string order_id = 1;
+  bool changed = 2;
+  repeated TicketTypeInventory items = 3;
+}

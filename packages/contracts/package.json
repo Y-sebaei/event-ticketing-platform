@@ -1,0 +1,21 @@
+{
+  "name": "@ticketing/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node ./copy-proto.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "proto:gen": "protoc --plugin=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=./src/generated --ts_proto_opt=nestJs=true,fileSuffix=,snakeToCamel=true --proto_path=./proto ./proto/inventory.proto"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "ts-proto": "^2.5.0",
+    "@nestjs/microservices": "^11.0.1",
+    "rxjs": "^7.8.1"
+  }
+}
