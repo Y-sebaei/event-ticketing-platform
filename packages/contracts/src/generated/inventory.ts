@@ -55,6 +55,15 @@ export interface HoldResponse {
   items: TicketTypeInventory[];
 }
 
+export interface ConfirmRequest {
+  orderId: string;
+}
+
+export interface ConfirmResponse {
+  orderId: string;
+  changed: boolean;
+}
+
 export interface CommitRequest {
   orderId: string;
 }
@@ -83,6 +92,7 @@ export interface InventoryServiceClient {
   registerTicketType(request: RegisterTicketTypeRequest): Observable<TicketTypeInventory>;
   getAvailability(request: GetAvailabilityRequest): Observable<GetAvailabilityResponse>;
   hold(request: HoldRequest): Observable<HoldResponse>;
+  confirm(request: ConfirmRequest): Observable<ConfirmResponse>;
   commit(request: CommitRequest): Observable<CommitResponse>;
   release(request: ReleaseRequest): Observable<ReleaseResponse>;
 }
@@ -96,6 +106,9 @@ export interface InventoryServiceController {
     request: GetAvailabilityRequest,
   ): Promise<GetAvailabilityResponse> | Observable<GetAvailabilityResponse> | GetAvailabilityResponse;
   hold(request: HoldRequest): Promise<HoldResponse> | Observable<HoldResponse> | HoldResponse;
+  confirm(
+    request: ConfirmRequest,
+  ): Promise<ConfirmResponse> | Observable<ConfirmResponse> | ConfirmResponse;
   commit(request: CommitRequest): Promise<CommitResponse> | Observable<CommitResponse> | CommitResponse;
   release(
     request: ReleaseRequest,
@@ -108,6 +121,7 @@ export function InventoryServiceControllerMethods() {
       'registerTicketType',
       'getAvailability',
       'hold',
+      'confirm',
       'commit',
       'release',
     ];

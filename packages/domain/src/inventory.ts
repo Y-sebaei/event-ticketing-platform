@@ -20,7 +20,12 @@ export interface InventoryState {
   quantitySold: number;
 }
 
-export type ReservationState = 'held' | 'committed' | 'released';
+/**
+ * 'confirmed' sits between held and committed: payment has succeeded but the
+ * fulfilment consumer has not run yet. It exists so the expiry sweeper, which
+ * only ever collects 'held', cannot reclaim seats that are already paid for.
+ */
+export type ReservationState = 'held' | 'confirmed' | 'committed' | 'released';
 
 export interface Reservation {
   orderId: string;
@@ -108,9 +113,11 @@ export function release(
   if (reservation.state === 'released') {
     return { state, reservation, changed: false };
   }
-  if (reservation.state === 'committed') {
+  // Confirmed means paid. Releasing those seats is the exact failure this
+  // state was introduced to prevent, so it is refused as loudly as a commit.
+  if (reservation.state === 'committed' || reservation.state === 'confirmed') {
     throw new InvariantViolationError({
-      reason: 'release_after_commit',
+      reason: reservation.state === 'confirmed' ? 'release_after_payment' : 'release_after_commit',
       orderId: reservation.orderId,
     });
   }
@@ -122,8 +129,28 @@ export function release(
   return { state: next, reservation: { ...reservation, state: 'released' }, changed: true };
 }
 
+/**
+ * Only a hold expires. Once payment has been confirmed the reservation is out
+ * of the sweeper's reach for good — the seats are sold, whatever the clock says.
+ */
 export function isExpired(reservation: Reservation, now: Date): boolean {
   return reservation.state === 'held' && reservation.expiresAt.getTime() <= now.getTime();
+}
+
+/** Pins a hold against expiry once payment succeeds. Idempotent. */
+export function confirm(
+  reservation: Reservation,
+): { reservation: Reservation; changed: boolean } {
+  if (reservation.state === 'confirmed' || reservation.state === 'committed') {
+    return { reservation, changed: false };
+  }
+  if (reservation.state === 'released') {
+    throw new InvariantViolationError({
+      reason: 'confirm_after_release',
+      orderId: reservation.orderId,
+    });
+  }
+  return { reservation: { ...reservation, state: 'confirmed' }, changed: true };
 }
 
 /** Matches the Stripe Checkout Session lifetime so the two can never disagree. */

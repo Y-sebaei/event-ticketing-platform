@@ -236,8 +236,13 @@ Check it yourself after running the demo — zero rows means no order was ever c
 twice:
 
 ```bash
-docker compose exec postgres psql -U app -d ticketing -c "SELECT ref_id, count(*) FROM inventory.ledger WHERE reason = 'commit' GROUP BY ref_id HAVING count(*) > 1;"
+docker compose exec postgres psql -U app -d ticketing -c "SELECT ref_id, ticket_type_id, count(*) FROM inventory.ledger WHERE reason = 'commit' GROUP BY ref_id, ticket_type_id HAVING count(*) > 1;"
 ```
+
+The grouping is by order *and* ticket type, not order alone. The ledger records one row
+per ticket type per operation, so an order spanning three tiers legitimately has three
+commit rows — grouping by order id only would report every multi-tier purchase as a
+double commit.
 
 ### Try killing the consumer
 
@@ -345,6 +350,15 @@ double-decrement" a SQL query rather than an argument.
 snapshotted so an order still renders correctly after the catalogue changes underneath it.
 
 ### Notable modelling decisions
+
+**A hold is pinned the moment payment succeeds.** Reservations move
+`held → confirmed → committed`, and the middle state exists for one reason. A hold expires
+15 minutes after checkout, but a paid order's reservation stays reserved until the
+fulfilment consumer commits it. If that consumer is down longer than the TTL, the expiry
+sweeper would reclaim seats belonging to an order that has already been paid for and put
+them back on sale — and Commit would then refuse them, leaving a customer charged, with no
+tickets, and their seats sold to someone else. The sweeper only collects `held`, so a
+confirmed reservation is out of its reach however long fulfilment takes.
 
 **Holds rather than decrement-on-purchase.** Between "pressed buy" and "webhook confirms"
 there are seconds to minutes during which those seats must not be sellable to anyone else

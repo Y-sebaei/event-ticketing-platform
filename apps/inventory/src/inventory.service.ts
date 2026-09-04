@@ -212,7 +212,11 @@ export class InventoryService {
           throw new InvariantViolationError({ reason: 'commit_after_release', orderId });
         }
 
-        const pending = reservations.rows.filter((r) => r.state === 'held');
+        // 'confirmed' is a paid hold awaiting fulfilment, so it commits exactly
+        // like a held one.
+        const pending = reservations.rows.filter(
+          (r) => r.state === 'held' || r.state === 'confirmed',
+        );
 
         if (pending.length === 0) {
           span.setAttribute('inventory.commit.replayed', true);
@@ -249,7 +253,7 @@ export class InventoryService {
         await client.query(
           `UPDATE inventory.reservation
               SET state = 'committed', updated_at = now()
-            WHERE order_id = $1 AND state = 'held'`,
+            WHERE order_id = $1 AND state IN ('held', 'confirmed')`,
           [orderId],
         );
 
@@ -311,6 +315,29 @@ export class InventoryService {
           await this.announce(client, updated[0]!.event_id, 'release', updated);
           return { orderId: req.orderId, changed: true, items: updated.map(toProto) };
         }),
+    );
+  }
+
+  /**
+   * Pins a hold against expiry because payment has succeeded.
+   *
+   * Called by the webhook handler the moment an order is marked paid. Without
+   * it, a fulfilment consumer that is down longer than the 15-minute hold TTL
+   * lets the sweeper reclaim seats belonging to an order that has already been
+   * paid for — and Commit then refuses them, leaving a customer charged with no
+   * tickets and their seats resold. Idempotent, because the webhook is.
+   */
+  async confirm(orderId: string): Promise<{ orderId: string; changed: boolean }> {
+    return withSpan('inventory.confirm', { 'order.id': orderId }, async () =>
+      withTransaction(this.pool, async (client) => {
+        const { rowCount } = await client.query(
+          `UPDATE inventory.reservation
+              SET state = 'confirmed', updated_at = now()
+            WHERE order_id = $1 AND state = 'held'`,
+          [orderId],
+        );
+        return { orderId, changed: (rowCount ?? 0) > 0 };
+      }),
     );
   }
 

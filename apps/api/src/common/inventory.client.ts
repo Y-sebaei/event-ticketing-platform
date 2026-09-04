@@ -3,6 +3,7 @@ import { ClientGrpc } from '@nestjs/microservices';
 import {
   INVENTORY_SERVICE_NAME,
   type CommitResponse,
+  type ConfirmResponse,
   type GetAvailabilityResponse,
   type HoldRequest,
   type HoldResponse,
@@ -64,6 +65,11 @@ export class InventoryClient implements OnModuleInit {
 
   hold(request: HoldRequest): Promise<HoldResponse> {
     return this.timed('hold', () => firstValueFrom(this.service.hold(request)));
+  }
+
+  /** Pins the hold once payment succeeds, so the sweeper cannot reclaim it. */
+  confirm(orderId: string): Promise<ConfirmResponse> {
+    return this.timed('confirm', () => firstValueFrom(this.service.confirm({ orderId })));
   }
 
   commit(orderId: string): Promise<CommitResponse> {

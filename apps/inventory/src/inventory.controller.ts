@@ -5,6 +5,8 @@ import {
   InventoryServiceControllerMethods,
   type CommitRequest,
   type CommitResponse,
+  type ConfirmRequest,
+  type ConfirmResponse,
   type GetAvailabilityRequest,
   type GetAvailabilityResponse,
   type HoldRequest,
@@ -65,6 +67,10 @@ export class InventoryController implements InventoryServiceController {
 
   hold(request: HoldRequest): Promise<HoldResponse> {
     return guard(() => this.inventory.hold(request));
+  }
+
+  confirm(request: ConfirmRequest): Promise<ConfirmResponse> {
+    return guard(() => this.inventory.confirm(request.orderId));
   }
 
   commit(request: CommitRequest): Promise<CommitResponse> {

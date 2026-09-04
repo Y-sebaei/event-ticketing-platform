@@ -211,6 +211,25 @@ export class PaymentsService {
     if (changed) {
       ordersPaid.add(1, { currency: order.currency });
       this.logger.log(`order ${order.id} paid; order.paid enqueued`);
+
+      // Pin the hold immediately. The seats are sold now, but the consumer that
+      // commits them may not run for a while — and if it takes longer than the
+      // hold TTL, the expiry sweeper would otherwise reclaim seats that have
+      // already been paid for and put them back on sale.
+      //
+      // A failure here is logged rather than thrown: the payment is already
+      // captured and answering the provider with an error would only earn us
+      // days of retries. It narrows the risk window rather than closing it, and
+      // the window is only dangerous if this call fails *and* fulfilment is
+      // delayed past the TTL.
+      try {
+        await this.inventory.confirm(order.id);
+      } catch (err) {
+        this.logger.error(
+          `could not pin the hold for paid order ${order.id}: ${(err as Error).message}. ` +
+            'If fulfilment is delayed past the hold TTL these seats may be released.',
+        );
+      }
     }
   }
 

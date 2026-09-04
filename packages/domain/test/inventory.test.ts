@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   HOLD_TTL_MS,
+  confirm,
   InsufficientInventoryError,
   InvariantViolationError,
   assertInvariant,
@@ -135,6 +136,46 @@ describe('expiry', () => {
     const later = new Date(NOW.getTime() + HOLD_TTL_MS * 10);
     expect(isExpired(held({ state: 'committed' }), later)).toBe(false);
     expect(isExpired(held({ state: 'released' }), later)).toBe(false);
+  });
+});
+
+describe('confirm — the paid-but-unfulfilled state', () => {
+  it('pins a hold so the expiry sweeper can never reclaim it', () => {
+    const result = confirm(held());
+    expect(result.changed).toBe(true);
+    expect(result.reservation.state).toBe('confirmed');
+
+    // The seats are paid for. No amount of elapsed time may release them.
+    const longAfterExpiry = new Date(NOW.getTime() + HOLD_TTL_MS * 100);
+    expect(isExpired(result.reservation, longAfterExpiry)).toBe(false);
+  });
+
+  it('is idempotent, because the webhook that triggers it is', () => {
+    const first = confirm(held());
+    const second = confirm(first.reservation);
+    expect(second.changed).toBe(false);
+    expect(second.reservation.state).toBe('confirmed');
+  });
+
+  it('still commits normally once fulfilment finally runs', () => {
+    const initial = reserve(state({ quantityTotal: 10 }), 2);
+    const pinned = confirm(held());
+    const result = commit(initial, pinned.reservation);
+
+    expect(result.changed).toBe(true);
+    expect(result.state.quantitySold).toBe(2);
+    expect(result.state.quantityReserved).toBe(0);
+  });
+
+  it('refuses to release seats that have been paid for', () => {
+    const pinned = confirm(held());
+    expect(() => release(state({ quantityReserved: 2 }), pinned.reservation)).toThrow(
+      InvariantViolationError,
+    );
+  });
+
+  it('refuses to confirm a reservation that was already released', () => {
+    expect(() => confirm(held({ state: 'released' }))).toThrow(InvariantViolationError);
   });
 });
 

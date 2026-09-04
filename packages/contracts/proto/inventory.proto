@@ -22,6 +22,10 @@ service InventoryService {
   // the same order produces the same end state and reports changed = false the
   // second time.
   rpc Hold(HoldRequest) returns (HoldResponse);
+  // Payment succeeded; fulfilment has not run yet. Pins the hold so the expiry
+  // sweeper cannot reclaim seats that have already been paid for, however long
+  // the consumer takes to get to them.
+  rpc Confirm(ConfirmRequest) returns (ConfirmResponse);
   rpc Commit(CommitRequest) returns (CommitResponse);
   rpc Release(ReleaseRequest) returns (ReleaseResponse);
 }
@@ -69,6 +73,15 @@ message HoldResponse {
   bool changed = 2;
   string expires_at = 3; // RFC 3339
   repeated TicketTypeInventory items = 4;
+}
+
+message ConfirmRequest {
+  string order_id = 1;
+}
+
+message ConfirmResponse {
+  string order_id = 1;
+  bool changed = 2;
 }
 
 message CommitRequest {
