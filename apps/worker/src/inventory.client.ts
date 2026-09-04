@@ -7,7 +7,7 @@ import {
 } from '@ticketing/contracts';
 import { grpcClientDuration } from '@ticketing/otel';
 import { firstValueFrom } from 'rxjs';
-import { INVENTORY_CLIENT } from './app.module';
+import { INVENTORY_CLIENT } from './tokens';
 
 @Injectable()
 export class InventoryClient implements OnModuleInit {

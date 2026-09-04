@@ -8,11 +8,7 @@ import { SearchIndexerConsumer } from './consumers/search-indexer.consumer';
 import { HealthController } from './health.controller';
 import { InventoryClient } from './inventory.client';
 import { Mailer } from './mailer';
-
-export const PG_POOL = Symbol('PG_POOL');
-export const KAFKA_PRODUCER = Symbol('KAFKA_PRODUCER');
-export const ELASTIC_CLIENT = Symbol('ELASTIC_CLIENT');
-export const INVENTORY_CLIENT = 'INVENTORY_PACKAGE_CLIENT';
+import { ELASTIC_CLIENT, INVENTORY_CLIENT, KAFKA_PRODUCER, PG_POOL } from './tokens';
 
 @Module({
   imports: [

@@ -13,7 +13,7 @@ import {
   type Pool,
   type Producer,
 } from '@ticketing/platform';
-import { KAFKA_PRODUCER, PG_POOL } from '../app.module';
+import { KAFKA_PRODUCER, PG_POOL } from '../tokens';
 import { InventoryClient } from '../inventory.client';
 import { Mailer } from '../mailer';
 

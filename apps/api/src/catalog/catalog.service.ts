@@ -3,7 +3,7 @@ import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { TOPICS } from '@ticketing/contracts';
 import { withSpan } from '@ticketing/otel';
 import { enqueueOutbox, withTransaction, type Pool } from '@ticketing/platform';
-import { PG_POOL } from '../common/infra.module';
+import { PG_POOL } from '../common/tokens';
 import { InventoryClient } from '../common/inventory.client';
 import type { CreateEventInput } from './catalog.dto';
 

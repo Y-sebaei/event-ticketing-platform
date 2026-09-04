@@ -1,6 +1,6 @@
 import { Controller, Get, Inject } from '@nestjs/common';
 import type { Pool } from '@ticketing/platform';
-import { PG_POOL } from './app.module';
+import { PG_POOL } from './tokens';
 
 @Controller('health')
 export class HealthController {

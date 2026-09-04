@@ -9,7 +9,7 @@ import {
 } from '@ticketing/domain';
 import { ordersCreated, withSpan } from '@ticketing/otel';
 import { withTransaction, type Pool } from '@ticketing/platform';
-import { PG_POOL } from '../common/infra.module';
+import { PG_POOL } from '../common/tokens';
 import { InventoryClient } from '../common/inventory.client';
 import { PAYMENT_GATEWAY, type PaymentGateway } from '../payments/payment-gateway';
 import type { CheckoutInput } from './orders.dto';

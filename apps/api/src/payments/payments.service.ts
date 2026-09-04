@@ -3,7 +3,7 @@ import { TOPICS } from '@ticketing/contracts';
 import { transition, type OrderStatus } from '@ticketing/domain';
 import { duplicatesSuppressed, ordersPaid, withSpan } from '@ticketing/otel';
 import { enqueueOutbox, withTransaction, type Pool } from '@ticketing/platform';
-import { PG_POOL } from '../common/infra.module';
+import { PG_POOL } from '../common/tokens';
 import { InventoryClient } from '../common/inventory.client';
 import type { PaymentEvent } from './payment-gateway';
 

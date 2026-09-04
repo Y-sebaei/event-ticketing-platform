@@ -1,7 +1,7 @@
 import { Controller, Get, Inject, ServiceUnavailableException } from '@nestjs/common';
 import { Client as ElasticClient } from '@elastic/elasticsearch';
 import type { Pool } from '@ticketing/platform';
-import { ELASTIC_CLIENT, PG_POOL } from '../common/infra.module';
+import { ELASTIC_CLIENT, PG_POOL } from '../common/tokens';
 
 @Controller('health')
 export class HealthController {

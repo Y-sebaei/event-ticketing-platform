@@ -4,11 +4,9 @@ import { Client as ElasticClient } from '@elastic/elasticsearch';
 import { GRPC_LOADER_OPTIONS, INVENTORY_PACKAGE, inventoryProtoPath } from '@ticketing/contracts';
 import { OutboxRelay, createKafka, createPool, type Pool, type Producer } from '@ticketing/platform';
 
-export const PG_POOL = Symbol('PG_POOL');
-export const KAFKA_PRODUCER = Symbol('KAFKA_PRODUCER');
-export const ELASTIC_CLIENT = Symbol('ELASTIC_CLIENT');
-export const ORDERING_RELAY = Symbol('ORDERING_RELAY');
-export const INVENTORY_CLIENT = 'INVENTORY_PACKAGE_CLIENT';
+import { ELASTIC_CLIENT, INVENTORY_CLIENT, KAFKA_PRODUCER, ORDERING_RELAY, PG_POOL } from './tokens';
+
+export { ELASTIC_CLIENT, INVENTORY_CLIENT, KAFKA_PRODUCER, ORDERING_RELAY, PG_POOL };
 
 @Global()
 @Module({

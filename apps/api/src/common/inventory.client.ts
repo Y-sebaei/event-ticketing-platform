@@ -13,7 +13,7 @@ import {
 } from '@ticketing/contracts';
 import { grpcClientDuration } from '@ticketing/otel';
 import { firstValueFrom } from 'rxjs';
-import { INVENTORY_CLIENT } from './infra.module';
+import { INVENTORY_CLIENT } from './tokens';
 
 /**
  * A thin, typed wrapper so callers deal in promises and never touch rxjs.

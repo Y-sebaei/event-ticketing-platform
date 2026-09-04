@@ -10,7 +10,7 @@ import {
 } from '@ticketing/contracts';
 import { searchIndexFailures, withSpan } from '@ticketing/otel';
 import { createKafka, startConsumer, type Consumer, type Pool, type Producer } from '@ticketing/platform';
-import { ELASTIC_CLIENT, KAFKA_PRODUCER, PG_POOL } from '../app.module';
+import { ELASTIC_CLIENT, KAFKA_PRODUCER, PG_POOL } from '../tokens';
 
 /**
  * The indexing path, and the answer to "what happens when indexing fails".

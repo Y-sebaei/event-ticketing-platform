@@ -5,7 +5,7 @@ import { EVENTS_INDEX, type EventDocument } from '@ticketing/contracts';
 import { withSpan } from '@ticketing/otel';
 import type { Pool } from '@ticketing/platform';
 import { z } from 'zod';
-import { ELASTIC_CLIENT, PG_POOL } from '../common/infra.module';
+import { ELASTIC_CLIENT, PG_POOL } from '../common/tokens';
 
 export const searchQuerySchema = z.object({
   q: z.string().trim().max(200).optional(),
