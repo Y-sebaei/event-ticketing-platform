@@ -52,6 +52,14 @@ jobs:
     name: End-to-end against the real stack
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # Production holds seats for 15 minutes, matching the payment session
+      # lifetime. Compressed here so the hold-expiry tests can wait out a whole
+      # hold window in about a minute. Those tests skip themselves entirely
+      # unless this is set low, so without it the money-losing sweeper bug would
+      # go unguarded in CI.
+      CHECKOUT_HOLD_TTL_SECONDS: '45'
+      RESERVATION_SWEEP_INTERVAL_MS: '5000'
     steps:
       - uses: actions/checkout@v4
 

@@ -40,6 +40,20 @@ interface EventForCheckout {
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
 
+  /**
+   * How long seats are held while the customer pays.
+   *
+   * Defaults to the domain constant, which deliberately matches the payment
+   * session lifetime so the two cannot disagree about when an order stops being
+   * live. Overridable only so the end-to-end suite can exercise hold expiry in
+   * seconds rather than waiting a quarter of an hour; nothing in production
+   * sets it.
+   */
+  private readonly holdTtlMs =
+    Number(process.env.CHECKOUT_HOLD_TTL_SECONDS) > 0
+      ? Number(process.env.CHECKOUT_HOLD_TTL_SECONDS) * 1000
+      : HOLD_TTL_MS;
+
   constructor(
     @Inject(PG_POOL) private readonly pool: Pool,
     private readonly inventory: InventoryClient,
@@ -152,7 +166,7 @@ export class OrdersService {
 
         const orderId = randomUUID();
         const accessToken = randomBytes(24).toString('base64url');
-        const expiresAt = new Date(Date.now() + HOLD_TTL_MS);
+        const expiresAt = new Date(Date.now() + this.holdTtlMs);
 
         await withTransaction(this.pool, async (client) => {
           const customer = await client.query<{ id: string }>(
@@ -203,7 +217,7 @@ export class OrdersService {
               ticketTypeId: l.ticketTypeId,
               quantity: l.quantity,
             })),
-            ttlSeconds: Math.floor(HOLD_TTL_MS / 1000),
+            ttlSeconds: Math.floor(this.holdTtlMs / 1000),
           });
         } catch (err) {
           // Sold out between rendering the page and pressing buy. Fail the

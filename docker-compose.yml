@@ -25,6 +25,11 @@ x-node-app: &node-app
     STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
     LOCAL_PAYMENT_WEBHOOK_SECRET: ${LOCAL_PAYMENT_WEBHOOK_SECRET:-whsec_local_dev_secret}
     PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:5173}
+    # Seats held while the customer pays. 15 minutes in production, matching the
+    # payment session lifetime. CI compresses it so the expiry paths can be
+    # tested in seconds instead of a quarter of an hour.
+    CHECKOUT_HOLD_TTL_SECONDS: ${CHECKOUT_HOLD_TTL_SECONDS:-900}
+    RESERVATION_SWEEP_INTERVAL_MS: ${RESERVATION_SWEEP_INTERVAL_MS:-15000}
     PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:3000}
   restart: unless-stopped
 
